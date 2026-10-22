@@ -25,7 +25,12 @@ For an Alpine-based image, select its web-server user:
 node tests/docker/capabilities.mjs --image freshrss/freshrss:edge-alpine --cli-user apache --report tests/docker/reports/alpine.json
 ```
 
-The default adapter supports the existing port-80 images and detects the rootless contract from `USER 33:33` plus `FRESHRSS_RUNTIME_DIR=/run/freshrss`. For that image it defaults to port 8080, explicitly prepares new data-volume ownership, and preserves the default application identity for CLI operations. The adapter also runs the capability fixture with a read-only root filesystem, dropped capabilities, `no-new-privileges`, and a private runtime tmpfs; these are test-launch constraints, not image-hardening deliverables or acceptance requirements for the rootless work. PHP CLI and FreshRSS remain at `/var/www/FreshRSS`. Use `--fixture-image IMAGE` to keep the fixture image fixed; immutable image IDs/digests are recorded in reports.
+The default adapter supports the existing port-80 images and detects the rootless contract from `USER 33:33` plus `FRESHRSS_RUNTIME_DIR=/run/freshrss`. For that image it defaults to port 8080, explicitly prepares data-volume ownership, and preserves the default application identity for CLI operations. This preparation isolates broad capability checks from volume-driver copy-up behavior; it does not test the fresh-volume ownership contract. The adapter also runs its fixture with a read-only root filesystem, dropped capabilities, `no-new-privileges`, and a private runtime tmpfs; these are extra test-launch constraints, not requirements of the rootless definitions. PHP CLI and FreshRSS remain at `/var/www/FreshRSS`. Use `--fixture-image IMAGE` to keep the fixture image fixed; immutable image IDs/digests are recorded in reports.
+
+The capability adapter prepares storage so functional parity checks remain
+independent of volume-driver copy-up behavior. Use the focused rootless contract
+test below to verify fresh named-volume permissions and first-run behavior
+without that helper.
 
 ## Covered capabilities
 
@@ -77,11 +82,45 @@ node tests/docker/capabilities.mjs --image freshrss/freshrss:candidate --baselin
 
 The runner exits nonzero on failed tests, failed cleanup, invalid/incomplete baselines, or any baseline capability that did not pass for the candidate. Dependent tests are explicitly skipped when a prerequisite fails; skipped tests do not count as preserved capabilities. Reports contain named results, durations, image identity, and the CLI module/configuration inventory. The suite version must match the baseline; regenerate the baseline deliberately when changing the test contract.
 
-## Use the same assertions with the rootless image
+## Test the rootless image
 
-[Dockerfile-Rootless](../../Docker/Dockerfile-Rootless) installs Debian-packaged snooze on the default `debian:13-slim` base, with Apache `mod_php`, CLI, OIDC, and explicit `tzdata`. Build with `docker build -f Docker/Dockerfile-Rootless -t freshrss:rootless-snooze .`, then select it with `--image freshrss:rootless-snooze`. The image defaults to `33:33` and port 8080. The current v13 capability suite passed on both a conventional engine and the actual rootless WSL2 daemon using the same image digest; reports are [here](reports/entrypoint-refactor-rootless-rootful-v13-retest.json) and [here](reports/entrypoint-refactor-rootless-actual-rootless-v13.json). A scheduled refresh is covered. The older [Supercronic integration results](reports/rootless-supercronic.md) are historical and do not validate the current snooze scheduler.
+[Dockerfile-Rootless](../../Docker/Dockerfile-Rootless) builds the additional Debian-based image with Apache, PHP CLI, OIDC, and the `CRON_MIN` scheduler. Build it from the repository root, then run the same broad functional suite used for the existing variants:
 
-The [scheduler contract](../../Docker/ROOTLESS-SCOPE.md#nonroot-runtime-and-scheduling-contract) defines minute-list translation, invalid-input rejection, serial execution, skipped schedules during long jobs, lateness allowance, failure recovery, environment/timezone inheritance, and bounded shutdown. The separate [identity/storage report](reports/rootless-identity-storage-v1.md) verifies process identities and prepared-volume ownership/persistence on both engines. Remaining focused work is the scheduler edge cases. The capability suite's `CRON_MIN='*'` test confirms a real scheduled feed refresh, but not all translation expressions, DST/clock changes, failure cases, or scheduler lifecycle behavior.
+```sh
+docker build -f Docker/Dockerfile-Rootless -t freshrss:rootless-test .
+node tests/docker/capabilities.mjs --image freshrss:rootless-test --report tests/docker/reports/rootless-capabilities-rootful.json
+```
+
+Run the image against both a conventional Docker daemon and an actual rootless Docker daemon. The `--engine` option verifies the selected daemon using Docker's reported security options; it fails if the requested engine type does not match. Docker daemons have separate image stores, so load/copy the built image into the second daemon. The JSON report records its immutable image ID; pass that ID as `--expected-image-id` on the second engine to ensure both runs use the exact same build. For example, on Linux:
+
+```sh
+node tests/docker/rootless-contract.mjs --image freshrss:rootless-test --engine rootful --report tests/docker/reports/rootless-contract-rootful.json
+docker save freshrss:rootless-test -o /tmp/freshrss-rootless-test.tar
+XDG_RUNTIME_DIR=/run/user/1001 DOCKER_HOST=unix:///run/user/1001/docker.sock docker load -i /tmp/freshrss-rootless-test.tar
+XDG_RUNTIME_DIR=/run/user/1001 DOCKER_HOST=unix:///run/user/1001/docker.sock \
+  node tests/docker/capabilities.mjs --image freshrss:rootless-test --report tests/docker/reports/rootless-capabilities-rootless.json
+XDG_RUNTIME_DIR=/run/user/1001 DOCKER_HOST=unix:///run/user/1001/docker.sock \
+  node tests/docker/rootless-contract.mjs --image freshrss:rootless-test --engine rootless \
+  --expected-image-id sha256:IMAGE_ID_FROM_ROOTFUL_REPORT \
+  --report tests/docker/reports/rootless-contract-rootless.json
+```
+
+The focused contract test checks the image's fixed `33:33` default identity and port `8080`, verifies that a changed runtime UID/GID is rejected, confirms Apache, PHP CLI, and the in-container scheduler run as `33:33`, and checks the default listener and `LISTEN` override. It also starts with a **fresh named volume without running a chown helper**, checks its `33:33`/`0700` data-directory permissions, confirms the installer is reachable, and verifies data persists across container recreation. These checks intentionally run without read-only-root or capability-drop options because those are outside the rootless-definition acceptance criteria.
+
+The focused runner uses Node's built-in `node:test` subtests, the shared Docker command helper, and a versioned JSON report with per-test status/duration and cleanup status.
+
+To also check a host bind mount, prepare an empty disposable Linux directory with ownership that maps to container UID/GID `33:33` for the selected daemon, then pass it to the same test:
+
+```sh
+mkdir -p /tmp/freshrss-rootless-bind-test
+chown 33:33 /tmp/freshrss-rootless-bind-test  # conventional/rootful Docker example
+node tests/docker/rootless-contract.mjs --image freshrss:rootless-test --engine rootful \
+  --bind-data /tmp/freshrss-rootless-bind-test
+```
+
+For a rootless daemon, prepare the host directory using the UID/GID mapping configured for that daemon; container `33:33` commonly maps to a subordinate host UID/GID. The test requires the path to be empty and does not change its ownership. It writes a sentinel, checks host-side visibility and persistence across container recreation, and removes only that sentinel during cleanup.
+
+The broad capability adapter explicitly prepares its named volume, so use `rootless-contract.mjs` for the no-helper volume contract and rootless-specific identity checks. Older [Supercronic reports](reports/rootless-supercronic.md) describe a superseded scheduler; the current image uses Debian `snooze` through its translation/runner layer. The capability suite tests a real scheduled refresh, while the focused contract test confirms the scheduler process identity.
 
 The assertions in [capabilities.mjs](capabilities.mjs) are separate from deployment control in [image-target.mjs](image-target.mjs). A local adapter module selected with `--adapter FILE.mjs` must export `createTarget(options)` returning:
 
@@ -111,6 +150,6 @@ The adapter extension point is provided; a future multi-service adapter can be a
 
 ## Rootless-definition status and coverage limits
 
-Step 1 scope, frozen reference measurements, selected Debian base, fixed application identity, scheduler assumption probes, and the dedicated rootful/rootless Linux environments are recorded in [ROOTLESS-SCOPE.md](../../Docker/ROOTLESS-SCOPE.md). Reproduction tools and their limits are documented in [step1/README.md](step1/README.md).
+The additional image's operator-facing setup and storage instructions are in the [Rootless image guide](../../Docker/README-Rootless.md). Historical base and scheduler assumption probes are documented in [step1/README.md](step1/README.md); they are not a substitute for running the current image tests above.
 
-This is a capability baseline, not the complete application test matrix. Suite v13 exercises SQLite, PostgreSQL, MySQL, and MariaDB, plus custom configuration mounts, documented operator settings, local proxy/sub-path handling, WebSub delivery, and OIDC login/rejection/logout/inactivity expiry. The integrated image defaults to nonroot and passes this subset under both engine types. Scheduler translation, timing, failure, and shutdown checks also passed under both engines. See the [rootless-image plan](../../Docker/ROOTLESS-IMAGE-PLAN.md) for the two definition-specific acceptance criteria and current validation limits, including DST/clock-step and native multi-architecture execution. HTTP Basic Auth, extension hooks, HTTPS/custom CAs, backup restoration, and schema upgrades/rollback are broader coverage items, not image-hardening requirements for this work.
+This is a capability baseline, not the complete application test matrix. Suite v13 exercises SQLite, PostgreSQL, MySQL, and MariaDB, plus custom configuration mounts, documented operator settings, local proxy/sub-path handling, WebSub delivery, and OIDC login/rejection/logout/inactivity expiry. Run it alongside the focused rootless contract test on both engine types. Neither suite covers every database version, DST/clock-step behavior, or native multi-architecture execution. HTTP Basic Auth, extension hooks, HTTPS/custom CAs, backup restoration, and schema upgrades/rollback are broader coverage items, not rootless-definition requirements.

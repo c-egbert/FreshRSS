@@ -53,7 +53,10 @@ prepare_runtime_paths() {
 	mkdir -p "$data_path" || die "Cannot create DATA_PATH '$data_path' as non-root."
 	[ -w "$data_path" ] || die "DATA_PATH '$data_path' is not writable by uid $(id -u)."
 
-	if [ -f /etc/apache2/envvars ]; then
+	# The rootless profile uses the fixed www-data identity. The generic standard
+	# profile instead must match Debian's configured account when launched as a
+	# non-root user.
+	if [ "$runtime_profile" = standard ] && [ -f /etc/apache2/envvars ]; then
 		apache_user=$(sed -n 's/^export APACHE_RUN_USER=//p' /etc/apache2/envvars | head -n 1 | tr -d "'\"")
 		if [ -n "$apache_user" ] && id "$apache_user" >/dev/null 2>&1 && [ "$(id -u "$apache_user")" != "$(id -u)" ]; then
 			die "Apache is configured to run as '$apache_user', but the container runs as uid $(id -u). Use that account or configure Apache for the runtime uid."

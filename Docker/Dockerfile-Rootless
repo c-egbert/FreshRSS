@@ -46,12 +46,11 @@ RUN \
 	phpdismod calendar exif ffi ftp gettext mysqli posix readline shmop sockets sysvmsg sysvsem sysvshm xsl && \
 	# Disable built-in FreshRSS updates when using Docker, as the full image is supposed to be updated instead
 	sed -r -i "\\#disable_update#s#^.*#\t'disable_update' => true,#" ./config.default.php && \
-	# Application code is immutable; operators prepare mounted storage.
+	# Application code is immutable; the rootless image uses a fixed www-data identity.
 	chmod -R go-w /var/www/FreshRSS && \
-	usermod --home /run/freshrss/home www-data && \
 	mkdir -p /var/www/FreshRSS/data /run/freshrss && \
 	chown 33:33 /var/www/FreshRSS/data /run/freshrss && \
-	chmod 700 /run/freshrss
+	chmod 0700 /var/www/FreshRSS/data /run/freshrss
 
 ENV COPY_LOG_TO_SYSLOG=On
 ENV COPY_SYSLOG_TO_STDERR=On

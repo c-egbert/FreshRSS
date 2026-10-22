@@ -77,6 +77,7 @@ The [tags](https://hub.docker.com/r/freshrss/freshrss/tags) correspond to FreshR
 * `:x.y.z` tags correspond to [specific FreshRSS releases](https://github.com/FreshRSS/FreshRSS/releases), allowing you to target a precise version for deployment
 * `:x` tags track the latest release within a major version series. For instance, `:1` will update to include any `1.x` releases, but will exclude versions beyond `2.x`. Note that bug fixes and security fixes are not backported.
 * `*-alpine` use Linux Alpine as base-image instead of Debian
+* `:rootless`, `:edge-rootless`, `:x.y.z-rootless`, and `:x-rootless` use the Debian rootless image with UID/GID of `33:33` (www-data user). `:rootless` follows the latest versioned release; the other tags follow the corresponding release or branch.
 * Our Docker images are designed with multi-architecture support, accommodating a variety of Linux platforms including `linux/arm/v7`, `linux/arm64`, and `linux/amd64`.
   * For other platforms, see the [custom build section](#build-custom-docker-image)
 
@@ -98,7 +99,7 @@ and with newer packages in general (Apache, PHP).
 * `FRESHRSS_ENV`: (default is `production`) Enables additional development information if set to `development` (increases the level of logging and ensures that errors are displayed) (see below for more development options)
 * `COPY_LOG_TO_SYSLOG`: (default is `On`) Copy all the logs to syslog
 * `COPY_SYSLOG_TO_STDERR`: (default is `On`) Copy syslog to Standard Error so that it is visible in docker logs
-* `LISTEN`: (default is `80`) Modifies the internal Apache listening address and port, e.g. `0.0.0.0:8080` (for advanced users; useful for [Docker host networking](https://docs.docker.com/engine/network/drivers/host/))
+* `LISTEN`: Sets the internal Apache listening address and port. The default is `80` for existing images and `8080` for the rootless image. For example, use `0.0.0.0:8080` for [Docker host networking](https://docs.docker.com/engine/network/drivers/host/). Ports must be between `1` and `65535`; binding to ports below `1024` may require additional privileges from the container engine.
 * `INTERNAL_HOST_ALLOWLIST`: (default is empty, can also be set in `data/config.php` or under *System configuration* in Web UI) Requests to internal hosts such as 127.0.0.1 are blocked by default; here you can add overrides for which internal hosts to allow, separated by whitespace. Each host should be described either as a `host:port` combination, CIDR notation (`0.0.0.0/0` to allow any IPv4, `::/0` to allow any IPv6) or `*` to allow all hosts (unsafe)
 * `FRESHRSS_INSTALL`: automatically pass arguments to command line `cli/do-install.php` (for advanced users; see example in Docker Compose section). Only executed at the very first run (so far), so if you make any change, you need to delete your `freshrss` service, `freshrss_data` volume, before running again.
 * `FRESHRSS_USER`: automatically pass arguments to command line `cli/create-user.php` (for advanced users; see example in Docker Compose section). Only executed at the very first run (so far), so if you make any change, you need to delete your `freshrss` service, `freshrss_data` volume, before running again.
@@ -134,47 +135,7 @@ docker build --pull --tag freshrss/freshrss:custom -f Docker/Dockerfile-Alpine h
 
 ### Rootless image
 
-[Dockerfile-Rootless](Dockerfile-Rootless) defines an additional Debian-based image with Apache `mod_php`, OIDC, and Debian-packaged snooze. It defaults to `www-data` UID/GID `33:33` and internal HTTP port `8080`. The current amd64 image digest passed the v13 capability suite and baseline comparison on both a conventional engine and an actual rootless WSL2 Docker daemon. Focused checks also confirmed `33:33` process identities and prepared named-volume/bind-mount ownership and persistence on both engines. Scheduler parsing, timing, failure, and lifecycle checks passed on both engines; DST and clock-step behavior remain unverified. It is not yet a published release tag. The current reports and two-definition acceptance criteria are in the [rootless image plan](ROOTLESS-IMAGE-PLAN.md). This work targets the two rootless definitions and does not make image hardening a goal.
-
-The ongoing [Docker design decision record](DESIGN-DECISIONS.md) explains the rationale and constraints behind image and runtime choices. Update it when future Docker work changes an established decision.
-
-Build from the repository root and prepare a new data volume using the selected Docker engine:
-
-```sh
-docker build -f Docker/Dockerfile-Rootless -t freshrss:rootless-snooze .
-docker volume create freshrss_rootless_data
-docker run --rm --user 0:0 --entrypoint /usr/bin/chown \
-  --mount type=volume,source=freshrss_rootless_data,target=/data \
-  freshrss:rootless-snooze 33:33 /data
-
-docker run -d --name freshrss_rootless \
-  --mount type=volume,source=freshrss_rootless_data,target=/var/www/FreshRSS/data \
-  -p 8080:8080 -e TZ=Europe/Paris -e CRON_MIN=13,43 \
-  freshrss:rootless-snooze
-```
-
-The ownership command is an explicit operator step for new storage; application startup stays nonroot. Use these same commands against an actual rootless Docker daemon to exercise engine-level rootlessness. Bind mounts need ownership matching that daemon's user-namespace mapping; see [ownership preparation](ROOTLESS-SCOPE.md#linux-test-environment-and-ownership-preparation). Back up and migrate existing data separately before changing its ownership. Runtime UID overrides are outside this image's contract.
-
-Complete the installation through the Web UI or the existing `FRESHRSS_INSTALL` / `FRESHRSS_USER` settings. Use an absolute path when setting a custom `DATA_PATH`, matching its prepared writable mount. Mount extension code read-only and keep extension state in the data volume. Apache configuration, PID/lock files, PHP sessions/uploads, and home files are generated in private `/run/freshrss`; PHP's default temporary and refresh-mutex directory is shared `DATA_PATH/.tmp`. Processes sharing data must use the same data path and shared mutex location.
-
-`CRON_MIN` retains its minute-field syntax; an empty value disables scheduling. The [translation layer](rootless-cron.sh) validates the expression and expands it into a sorted, deduplicated minute list in private `/run/freshrss/cron-minutes`. It rejects whitespace, extra cron fields, empty list elements, descending ranges, minutes outside 0–59, and steps outside 1–59. For example:
-
-| `CRON_MIN` | Translated snooze minute list |
-| --- | --- |
-| `13,43` | `13,43` |
-| `*/20` | `0,20,40` |
-| `5-25/10` | `5,15,25` |
-| `1,10-20/5` | `1,10,15,20` |
-| `20/15` | `20,35,50` |
-| `*` | All minutes from `0` through `59` |
-
-The runner waits with `snooze -H '*' -M MINUTES -S 0`, using the inherited `TZ`. Refreshes run serially; schedules elapsed during a refresh are skipped rather than replayed. Snooze's default 60-second lateness allowance applies while waiting. A guard prevents two starts within the same epoch minute. Each refresh's start, completion, exit status, and output reach container logs. A failed refresh does not disable future runs; a failed scheduler wait stops the container.
-
-Jobs inherit the application environment and use the same PHP configuration as Apache and direct CLI commands, without an exported environment file or `su`. One-time installation/user-creation variables are removed before services start. The launcher supervises Apache and the scheduler runner, stops the container if either required service exits, and forwards shutdown to both process groups with an eight-second bound.
-
-For external scheduling, leave `CRON_MIN` empty and run `docker exec freshrss_rootless php app/actualize_script.php`. Administrative CLI commands also use the default identity, for example `docker exec freshrss_rootless php cli/list-users.php`. Explicit commands such as `docker run … freshrss:rootless-snooze php cli/list-users.php` prepare runtime configuration and storage without starting Apache or the scheduler.
-
-The current snooze candidate passed the existing v13 capability suite under both engine types, including an actual scheduled feed refresh. See the [conventional-engine report](../tests/docker/reports/entrypoint-refactor-rootless-rootful-v13-retest.json), [actual rootless-engine report](../tests/docker/reports/entrypoint-refactor-rootless-actual-rootless-v13.json), [identity/storage report](../tests/docker/reports/rootless-identity-storage-v1.md), and [scheduler edge report](../tests/docker/reports/rootless-scheduler-edges-v1.md); all identify the same image digest. Scheduler parsing, timing, missed ticks, failure recovery, and shutdown checks passed on both engines. DST transitions and simulated clock steps remain unverified. The old [Supercronic reports](../tests/docker/reports/rootless-supercronic.md) are historical and do not describe the current scheduler. Native arm64 execution is also not yet validated.
+The [rootless image guide](README-Rootless.md) covers its fixed `33:33` identity, installation with named volumes or host paths, Docker Compose, OIDC, scheduler, and storage requirements. The image is defined by [Dockerfile-Rootless](Dockerfile-Rootless); existing image variants are unchanged.
 
 ## Development mode
 

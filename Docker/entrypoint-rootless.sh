@@ -7,12 +7,25 @@
 prepare_rootless_runtime() {
 	umask 077
 	[ "${FRESHRSS_ENTRYPOINT_PROFILE:-}" = rootless ] || die 'FRESHRSS_ENTRYPOINT_PROFILE must be rootless.'
-	[ "$(id -u)" = 33 ] && [ "$(id -g)" = 33 ] || die 'This image requires UID/GID 33:33; prepare volume ownership before startup.'
+	[ "$(id -u)" = 33 ] && [ "$(id -g)" = 33 ] || die 'This image requires UID/GID 33:33; do not override --user.'
 	[ "${FRESHRSS_RUNTIME_DIR:-}" = /run/freshrss ] || die 'FRESHRSS_RUNTIME_DIR must be /run/freshrss.'
 	runtime=$FRESHRSS_RUNTIME_DIR
-	mkdir -p "$runtime" "$HOME" "$TMPDIR" "$runtime/php" "$runtime/apache" "$runtime/sessions" "$runtime/uploads" ||
-		die 'Cannot prepare /run/freshrss; mount a tmpfs owned by 33:33 with mode 0700.'
-	chmod 700 "$runtime" || die 'Could not secure /run/freshrss.'
+	mkdir -p "$runtime/php" "$runtime/apache" "$runtime/sessions" "$runtime/uploads" "$HOME" "$TMPDIR" ||
+		die 'Cannot prepare runtime paths; ensure /run/freshrss is writable by www-data (33:33).'
+	[ -w "$runtime" ] && [ -x "$runtime" ] && [ -w "$HOME" ] && [ -w "$TMPDIR" ] || die 'Runtime directory, HOME, and TMPDIR must be writable by www-data (33:33).'
+	APACHE_RUN_USER=www-data
+	APACHE_RUN_GROUP=www-data
+	APACHE_RUN_DIR="$runtime/apache"
+	APACHE_PID_FILE="$runtime/apache/apache2.pid"
+	APACHE_LOCK_DIR="$runtime/apache"
+	APACHE_LOG_DIR="$runtime/apache"
+	export APACHE_RUN_USER APACHE_RUN_GROUP APACHE_RUN_DIR APACHE_PID_FILE APACHE_LOCK_DIR APACHE_LOG_DIR
+	[ -n "${PHP_INI_SCAN_DIR:-}" ] || PHP_INI_SCAN_DIR=:/run/freshrss/php
+	case ":$PHP_INI_SCAN_DIR:" in
+		*:/run/freshrss/php:*) ;;
+		*) PHP_INI_SCAN_DIR="$PHP_INI_SCAN_DIR:/run/freshrss/php" ;;
+	esac
+	export PHP_INI_SCAN_DIR
 
 	# --- Generate PHP runtime paths and session/upload configuration ---
 	data_path=$(/usr/bin/php -r 'require "constants.php"; echo DATA_PATH;') || die 'Could not determine FreshRSS DATA_PATH.'
@@ -34,6 +47,12 @@ prepare_rootless_runtime() {
 	listen=${LISTEN:-8080}
 	if ! printf '%s\n' "$listen" | grep -Eq '^([[:alnum:]_.-]+:|\[[[:xdigit:]:]+\]:)?[0-9]{1,5}$'; then
 		die 'LISTEN must be a port or address:port.'
+	fi
+	port=${listen##*:}
+	port_number=$(printf '%s' "$port" | sed 's/^0*//')
+	[ -n "$port_number" ] || port_number=0
+	if [ "$port_number" -lt 1 ] || [ "$port_number" -gt 65535 ]; then
+		die 'LISTEN port must be between 1 and 65535.'
 	fi
 	case "${ENABLE_ACCESS_LOG:-1}" in
 		0|1) ;;
