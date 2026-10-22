@@ -1,0 +1,207 @@
+{
+  "suiteVersion": 13,
+  "image": "freshrss:entrypoint-refactor-root",
+  "adapter": "image-target.mjs",
+  "completed": true,
+  "tests": [
+    {
+      "name": "unconfigured image serves the installer",
+      "status": "passed",
+      "durationMs": 20
+    },
+    {
+      "name": "CLI extensions, database drivers, and container PHP defaults",
+      "status": "passed",
+      "durationMs": 199
+    },
+    {
+      "name": "read-only custom configuration mounts apply during automatic install and user creation",
+      "status": "passed",
+      "durationMs": 5691
+    },
+    {
+      "name": "Apache listener, trusted proxy, and access-log environment settings are honored",
+      "status": "passed",
+      "durationMs": 7604
+    },
+    {
+      "name": "CLI installation and user creation are repeatable",
+      "status": "passed",
+      "durationMs": 1897
+    },
+    {
+      "name": "Google Reader authenticates and forwards Authorization and PATH_INFO",
+      "status": "passed",
+      "durationMs": 85
+    },
+    {
+      "name": "private-network feeds require an explicit host allowlist",
+      "status": "passed",
+      "durationMs": 46
+    },
+    {
+      "name": "invalid API credentials are rejected",
+      "status": "passed",
+      "durationMs": 47
+    },
+    {
+      "name": "private paths are denied and static assets retain MIME types",
+      "status": "passed",
+      "durationMs": 139
+    },
+    {
+      "name": "form login, cookies, CSRF protection, and logout work",
+      "status": "passed",
+      "durationMs": 216
+    },
+    {
+      "name": "RSS, Atom, gzip redirects, and OPML import preserve Unicode content",
+      "status": "passed",
+      "durationMs": 93
+    },
+    {
+      "name": "a separate CLI refresh discovers new entries visible through HTTP",
+      "status": "passed",
+      "durationMs": 232
+    },
+    {
+      "name": "read and starred state can be changed through the API",
+      "status": "passed",
+      "durationMs": 45
+    },
+    {
+      "name": "Fever returns authenticated feeds and entries while users remain isolated",
+      "status": "passed",
+      "durationMs": 46
+    },
+    {
+      "name": "OPML and ZIP exports can be imported into another user",
+      "status": "passed",
+      "durationMs": 1060
+    },
+    {
+      "name": "access logs redact password and token query values",
+      "status": "passed",
+      "durationMs": 169
+    },
+    {
+      "name": "container recreation retains users, entries, and read/star state",
+      "status": "passed",
+      "durationMs": 1367
+    },
+    {
+      "name": "PostgreSQL, MySQL, and MariaDB install, persist, and serve refreshed entries",
+      "status": "passed",
+      "durationMs": 32512
+    },
+    {
+      "name": "WebSub subscription handshake and pushed content update work end to end",
+      "status": "passed",
+      "durationMs": 4479
+    },
+    {
+      "name": "OIDC login, provider logout, and inactivity expiry work against the local provider",
+      "status": "passed",
+      "durationMs": 14058
+    },
+    {
+      "name": "OIDC rejects invalid state, nonce, and ID-token signatures",
+      "status": "passed",
+      "durationMs": 22
+    },
+    {
+      "name": "OIDC protection leaves public assets and WebSub callbacks reachable with endpoint validation",
+      "status": "passed",
+      "durationMs": 22
+    },
+    {
+      "name": "interactive web installer provisions a fresh SQLite deployment",
+      "status": "passed",
+      "durationMs": 3992
+    },
+    {
+      "name": "entrypoint auto-install, auto-user, and custom DATA_PATH work across recreation",
+      "status": "passed",
+      "durationMs": 41239
+    }
+  ],
+  "target": {
+    "id": "sha256:358097c3fb47ebdce1b9dfbf6013f454737d78569cb14a65c23f5f2012f3ba47",
+    "digests": [
+      "freshrss@sha256:358097c3fb47ebdce1b9dfbf6013f454737d78569cb14a65c23f5f2012f3ba47"
+    ],
+    "architecture": "amd64",
+    "os": "linux",
+    "defaultUser": ""
+  },
+  "runtime": {
+    "php": "8.4.27",
+    "extensions": [
+      "Core",
+      "date",
+      "libxml",
+      "openssl",
+      "pcre",
+      "zlib",
+      "filter",
+      "hash",
+      "json",
+      "pcntl",
+      "random",
+      "Reflection",
+      "SPL",
+      "session",
+      "standard",
+      "sodium",
+      "mysqlnd",
+      "PDO",
+      "xml",
+      "ctype",
+      "curl",
+      "dom",
+      "fileinfo",
+      "gmp",
+      "iconv",
+      "intl",
+      "mbstring",
+      "pdo_mysql",
+      "pdo_pgsql",
+      "pdo_sqlite",
+      "pgsql",
+      "Phar",
+      "SimpleXML",
+      "sqlite3",
+      "tokenizer",
+      "xmlreader",
+      "xmlwriter",
+      "zip",
+      "Zend OPcache"
+    ],
+    "drivers": [
+      "mysql",
+      "pgsql",
+      "sqlite"
+    ],
+    "timezone": "UTC",
+    "upload": "32M",
+    "post": "32M",
+    "disableUpdate": true,
+    "environment": "production",
+    "copyLogToSyslog": true,
+    "copySyslogToStderr": true
+  },
+  "oidcSessionExpiry": {
+    "configuredTimeoutSeconds": 10,
+    "beforeDate": "Thu, 22 Oct 2026 05:01:12 GMT",
+    "observedDates": [
+      "Thu, 22 Oct 2026 05:01:24 GMT"
+    ],
+    "serverIdleMs": 12000
+  },
+  "comparison": {
+    "baseline": "tests/docker/reports/debian-default-parity-v13.json",
+    "status": "passed"
+  },
+  "cleanup": "passed",
+  "success": true
+}

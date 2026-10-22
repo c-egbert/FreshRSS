@@ -8,4 +8,5 @@
 /extensions/vendor/
 /node_modules/
 /tests/**/*.sqlite
+/tests/docker/.step1/
 /vendor/

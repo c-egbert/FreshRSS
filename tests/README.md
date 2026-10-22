@@ -10,6 +10,8 @@ See [`test.yml`](../.github/workflows/tests.yml) for the GitHub Actions automate
 
 See [`composer.json`](../composer.json) for the different tests and versions, to be run locally.
 
+For an isolated Docker capability baseline and comparisons with the rootless image, see the [container capability tests](docker/README.md).
+
 ## Details about this *tests* folder
 
 Unit tests are based on [PHPUnit](https://phpunit.de/).

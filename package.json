@@ -23,6 +23,7 @@
 		"node": ">=20"
 	},
 	"scripts": {
+		"test:docker": "node tests/docker/capabilities.mjs",
 		"eslint": "eslint .",
 		"eslint_fix": "eslint --fix .",
 		"markdownlint": "markdownlint-cli2",
