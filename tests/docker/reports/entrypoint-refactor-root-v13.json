@@ -192,14 +192,10 @@
   },
   "oidcSessionExpiry": {
     "configuredTimeoutSeconds": 10,
-    "beforeDate": "Thu, 22 Oct 2026 05:01:12 GMT",
-    "observedDates": [
-      "Thu, 22 Oct 2026 05:01:24 GMT"
-    ],
     "serverIdleMs": 12000
   },
   "comparison": {
-    "baseline": "tests/docker/reports/debian-default-parity-v13.json",
+    "baseline": "debian-default-parity-v13.json",
     "status": "passed"
   },
   "cleanup": "passed",

@@ -2,10 +2,28 @@ import { spawn } from 'node:child_process';
 import { Buffer } from 'node:buffer';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { homedir, tmpdir } from 'node:os';
 import { setTimeout, clearTimeout } from 'node:timers';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const { fetch, AbortSignal } = globalThis;
+
+// Docker and PHP diagnostics can echo local mount paths. Redact known machine
+// paths before including any subprocess output in a test failure or report.
+export function redactHostPaths(value, additionalPaths = []) {
+	let text = String(value);
+	const paths = [process.cwd(), homedir(), tmpdir(), process.env.HOME, process.env.USERPROFILE,
+		process.env.TEMP, process.env.TMP, ...additionalPaths].filter(Boolean);
+	for (const path of new Set(paths)) {
+		for (const variant of new Set([path, path.replaceAll('\\', '/'), path.replaceAll('/', '\\')])) {
+			text = text.split(variant).join('<host-path>');
+		}
+	}
+	return text
+		.replace(/([A-Za-z]:\\Users\\)[^\\/\s]+/g, '$1<user>')
+		.replace(/(\/Users\/|\/home\/)[^/\s]+/g, '$1<user>')
+		.replace(/(\/mnt\/[A-Za-z]\/Users\/)[^/\\\s]+/g, '$1<user>');
+}
 
 export async function command(args, { input, timeout = 120_000 } = {}) {
 	return await new Promise((resolve, reject) => {
@@ -28,7 +46,8 @@ export async function command(args, { input, timeout = 120_000 } = {}) {
 async function docker(args) {
 	const result = await command(args);
 	if (result.code !== 0) {
-		throw new Error(`Docker ${args[0]} failed: ${result.stderr.toString().trim()}`);
+		const mountPaths = args.flatMap(argument => [...argument.matchAll(/(?:^|,)source=([^,]+)/g)].map(match => match[1]));
+		throw new Error(`Docker ${args[0]} failed: ${redactHostPaths(result.stderr.toString().trim(), mountPaths)}`);
 	}
 	return result.stdout.toString().trim();
 }
@@ -100,7 +119,7 @@ export function createTarget(options) {
 		const portResult = await command(['port', web, `${listenPort}/tcp`]);
 		if (portResult.code !== 0 || !portResult.stdout.toString().trim()) {
 			const logs = await command(['logs', web]);
-			throw new Error(`FreshRSS container did not publish ${listenPort}/tcp after startup. Logs:\n${logs.stdout.toString()}${logs.stderr.toString()}`);
+			throw new Error(`FreshRSS container did not publish ${listenPort}/tcp after startup. Logs:\n${redactHostPaths(logs.stdout.toString() + logs.stderr.toString())}`);
 		}
 		hostPort = portResult.stdout.toString().trim().split(':').at(-1);
 		target.baseUrl = `http://127.0.0.1:${hostPort}/`;
@@ -110,6 +129,7 @@ export function createTarget(options) {
 
 	const target = {
 		baseUrl: '',
+		containerName: web,
 		feedUrl: 'http://fixtures:8080',
 		fixtureExternalUrl: '',
 		async start() {
@@ -160,7 +180,7 @@ export function createTarget(options) {
 			while (Date.now() < deadline) {
 				const result = await command(['exec', name, ...readyCommand]);
 				if (result.code === 0) return name;
-				last = result.stderr.toString().trim();
+				last = redactHostPaths(result.stderr.toString().trim());
 				await delay(1000);
 			}
 			throw new Error(`Service ${alias} did not become ready: ${last}`);
@@ -186,19 +206,19 @@ export function createTarget(options) {
 		async logs() {
 			const result = await command(['logs', web]);
 			if (result.code !== 0) throw new Error('Could not read application logs');
-			return result.stdout.toString() + result.stderr.toString();
+			return redactHostPaths(result.stdout.toString() + result.stderr.toString());
 		},
 		async fixtureLogs() {
 			const result = await command(['logs', fixture]);
 			if (result.code !== 0) throw new Error('Could not read fixture logs');
-			return result.stdout.toString() + result.stderr.toString();
+			return redactHostPaths(result.stdout.toString() + result.stderr.toString());
 		},
 		async diagnostics() {
 			const script = rootlessImage ?
 				'cat /run/freshrss/crontab; ps -ef; cat /proc/1/status' :
 				'crontab -l 2>&1; ps -ef; cat /tmp/FreshRSS.log 2>&1';
 			const result = await command(['exec', web, '/bin/sh', '-c', script]);
-			return result.stdout.toString() + result.stderr.toString();
+			return redactHostPaths(result.stdout.toString() + result.stderr.toString());
 		},
 		async metadata() {
 			const [image] = JSON.parse(await docker(['image', 'inspect', options.image]));

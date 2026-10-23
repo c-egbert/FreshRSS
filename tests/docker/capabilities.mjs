@@ -5,7 +5,7 @@ import console from 'node:console';
 import { createServer, request as httpRequest } from 'node:http';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { dirname, resolve } from 'node:path';
+import { basename, dirname, resolve } from 'node:path';
 import process from 'node:process';
 import { test } from 'node:test';
 import { setTimeout, clearTimeout } from 'node:timers';
@@ -13,6 +13,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { parseArgs } from 'node:util';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { runInNewContext } from 'node:vm';
+import { redactHostPaths } from './image-target.mjs';
 
 const { fetch, AbortSignal } = globalThis;
 
@@ -125,7 +126,7 @@ test('FreshRSS container capability contract', { timeout: 900_000 }, async t => 
 
 	async function cli(args, { code = 0, input } = {}) {
 		const result = await target.cli(args, { input });
-		assert.equal(result.code, code, `CLI ${args[0]} exit status: ${result.stderr.toString()}`);
+		assert.equal(result.code, code, `CLI ${args[0]} exit status: ${redactHostPaths(result.stderr.toString())}`);
 		return result.stdout;
 	}
 
@@ -721,7 +722,6 @@ test('FreshRSS container capability contract', { timeout: 900_000 }, async t => 
 		// an unprotected asset without session cookies so this never renews the
 		// protected session. A 12-second Date-header gap guarantees at least
 		// 11 seconds of server inactivity despite whole-second HTTP timestamps.
-		const observedDates = [];
 		let serverIdleMs = 0;
 		for (let attempt = 0; attempt < 5 && serverIdleMs < 12_000; attempt++) {
 			await delay(Math.min(12_000, Math.max(1000, 12_000 - serverIdleMs)));
@@ -729,11 +729,9 @@ test('FreshRSS container capability contract', { timeout: 900_000 }, async t => 
 			assert.equal(clock.status, 200, 'Public clock-probe asset must remain accessible');
 			const observed = Date.parse(clock.headers.date);
 			assert.ok(Number.isFinite(observed), 'Clock probe requires the server Date header');
-			observedDates.push(clock.headers.date);
 			serverIdleMs = observed - serverStart;
 		}
-		report.oidcSessionExpiry = { configuredTimeoutSeconds: 10, beforeDate: beforeExpiry.headers.date,
-			observedDates, serverIdleMs };
+		report.oidcSessionExpiry = { configuredTimeoutSeconds: 10, serverIdleMs };
 		assert.ok(serverIdleMs >= 12_000, 'Server clock did not advance enough for the idle-expiry check');
 		const expired = await browserGet(new URL('i/?c=subscription&a=index', target.baseUrl), {
 			...navigationHeaders, ...headers(),
@@ -947,7 +945,7 @@ test('FreshRSS container capability contract', { timeout: 900_000 }, async t => 
 
 	report.completed = true;
 	if (values.baseline) {
-		report.comparison = { baseline: values.baseline, status: 'failed' };
+		report.comparison = { baseline: basename(values.baseline), status: 'failed' };
 		await t.test('baseline has no lost capabilities', async () => {
 			const baseline = JSON.parse(await readFile(values.baseline, 'utf8'));
 			assert.equal(baseline.suiteVersion, report.suiteVersion, 'Baseline suite version differs');

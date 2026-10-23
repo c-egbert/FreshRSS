@@ -6,7 +6,7 @@ import process from 'node:process';
 import { test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { parseArgs } from 'node:util';
-import { command } from './image-target.mjs';
+import { command, redactHostPaths } from './image-target.mjs';
 
 const { fetch, AbortSignal } = globalThis;
 const { values } = parseArgs({ options: {
@@ -37,7 +37,8 @@ test('FreshRSS rootless image contract', { timeout: 300_000 }, async t => {
 
 	async function docker(args, options) {
 		const result = await command(args, options);
-		assert.equal(result.code, 0, `Docker ${args[0]} failed: ${result.stderr.toString().trim()}`);
+		const mountPaths = args.flatMap(argument => [...argument.matchAll(/(?:^|,)source=([^,]+)/g)].map(match => match[1]));
+		assert.equal(result.code, 0, `Docker ${args[0]} failed: ${redactHostPaths(result.stderr.toString().trim(), mountPaths)}`);
 		return result.stdout.toString().trim();
 	}
 
@@ -108,7 +109,7 @@ test('FreshRSS rootless image contract', { timeout: 300_000 }, async t => {
 		for (const { hostPath, filename } of bindSentinels) {
 			const result = await command(['run', '--rm', '--user', '33:33', '--entrypoint', '/bin/rm',
 				'--mount', `type=bind,source=${hostPath},target=/cleanup`, values.image, '-f', `/cleanup/${filename}`]);
-			if (result.code !== 0) errors.push(`bind sentinel ${hostPath}/${filename}: ${result.stderr.toString().trim()}`);
+			if (result.code !== 0) errors.push(`bind sentinel cleanup failed: ${redactHostPaths(result.stderr.toString().trim(), [hostPath])}`);
 		}
 		for (const name of containers.reverse()) {
 			const result = await command(['rm', '--force', name]);
@@ -156,14 +157,14 @@ test('FreshRSS rootless image contract', { timeout: 300_000 }, async t => {
 		const securityOptions = JSON.parse(await docker(['info', '--format', '{{json .SecurityOptions}}']));
 		const isRootless = securityOptions.some(option => /(^|,)name=rootless(,|$)/.test(option));
 		assert.equal(isRootless, values.engine === 'rootless', `Docker security options: ${JSON.stringify(securityOptions)}`);
-		report.engine = { kind: values.engine, context: await docker(['context', 'show']), securityOptions };
+		report.engine = { kind: values.engine, securityOptions };
 	});
 
 	await check('entrypoint rejects root and changed UID/GID overrides', async () => {
 		for (const user of ['1000:1000', '0:0']) {
 			const result = await command(['run', '--rm', '--user', user, values.image]);
 			assert.notEqual(result.code, 0, `Image unexpectedly started with UID/GID ${user}`);
-			assert.match(result.stderr.toString() + result.stdout.toString(), user === '0:0' ? /must not run as uid 0/i : /requires UID\/GID 33:33/i);
+			assert.match(redactHostPaths(result.stderr.toString() + result.stdout.toString()), user === '0:0' ? /must not run as uid 0/i : /requires UID\/GID 33:33/i);
 		}
 	}, [imageCheck]);
 
