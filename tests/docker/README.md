@@ -80,7 +80,7 @@ Keep the baseline report and write the candidate to a different file:
 node tests/docker/capabilities.mjs --image freshrss/freshrss:candidate --baseline tests/docker/reports/poc.json --report tests/docker/reports/candidate.json
 ```
 
-The runner exits nonzero on failed tests, failed cleanup, invalid/incomplete baselines, or any baseline capability that did not pass for the candidate. Dependent tests are explicitly skipped when a prerequisite fails; skipped tests do not count as preserved capabilities. Reports contain named results, durations, image identity, and the CLI module/configuration inventory. The suite version must match the baseline; regenerate the baseline deliberately when changing the test contract.
+The runner exits nonzero on failed tests, failed cleanup, invalid/incomplete baselines, or any baseline capability that did not pass for the candidate. Dependent tests are explicitly skipped when a prerequisite fails; skipped tests do not count as preserved capabilities. Reports contain named results, durations, tested image identity/platform, and the CLI module/configuration inventory. They omit Docker context names and full baseline paths; failure diagnostics redact common host paths. The suite version must match the baseline; regenerate the baseline deliberately when changing the test contract.
 
 ## Test the rootless image
 
@@ -96,11 +96,11 @@ Run the image against both a conventional Docker daemon and an actual rootless D
 ```sh
 node tests/docker/rootless-contract.mjs --image freshrss:rootless-test --engine rootful --report tests/docker/reports/rootless-contract-rootful.json
 docker save freshrss:rootless-test -o /tmp/freshrss-rootless-test.tar
-XDG_RUNTIME_DIR=/run/user/1001 DOCKER_HOST=unix:///run/user/1001/docker.sock docker load -i /tmp/freshrss-rootless-test.tar
-XDG_RUNTIME_DIR=/run/user/1001 DOCKER_HOST=unix:///run/user/1001/docker.sock \
-  node tests/docker/capabilities.mjs --image freshrss:rootless-test --report tests/docker/reports/rootless-capabilities-rootless.json
-XDG_RUNTIME_DIR=/run/user/1001 DOCKER_HOST=unix:///run/user/1001/docker.sock \
-  node tests/docker/rootless-contract.mjs --image freshrss:rootless-test --engine rootless \
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+export DOCKER_HOST="unix://${XDG_RUNTIME_DIR}/docker.sock"
+docker load -i /tmp/freshrss-rootless-test.tar
+node tests/docker/capabilities.mjs --image freshrss:rootless-test --report tests/docker/reports/rootless-capabilities-rootless.json
+node tests/docker/rootless-contract.mjs --image freshrss:rootless-test --engine rootless \
   --expected-image-id sha256:IMAGE_ID_FROM_ROOTFUL_REPORT \
   --report tests/docker/reports/rootless-contract-rootless.json
 ```
@@ -150,6 +150,6 @@ The adapter extension point is provided; a future multi-service adapter can be a
 
 ## Rootless-definition status and coverage limits
 
-The additional image's operator-facing setup and storage instructions are in the [Rootless image guide](../../Docker/README-Rootless.md). Historical base and scheduler assumption probes are documented in [step1/README.md](step1/README.md); they are not a substitute for running the current image tests above.
+The additional image's operator-facing setup and storage instructions are in the [Rootless image guide](../../Docker/README-Rootless.md). Historical base and scheduler assumption probes are documented in [parity/README.md](parity/README.md); they are not a substitute for running the current image tests above.
 
 This is a capability baseline, not the complete application test matrix. Suite v13 exercises SQLite, PostgreSQL, MySQL, and MariaDB, plus custom configuration mounts, documented operator settings, local proxy/sub-path handling, WebSub delivery, and OIDC login/rejection/logout/inactivity expiry. Run it alongside the focused rootless contract test on both engine types. Neither suite covers every database version, DST/clock-step behavior, or native multi-architecture execution. HTTP Basic Auth, extension hooks, HTTPS/custom CAs, backup restoration, and schema upgrades/rollback are broader coverage items, not rootless-definition requirements.
